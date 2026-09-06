@@ -38,8 +38,8 @@ jobs:
       - name: Grant execute permission to Gradle wrapper
         run: chmod +x ./gradlew
 
-      # PRs siempre se validan en modo rápido/debug.
-      # Incluso una PR que tenga como destino main.
+      # PRs are always validated in fast/debug mode,
+      # even a PR targeting main.
       - name: Run Android Lint
         run: ./gradlew lintDebug
 
@@ -69,3 +69,169 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 7
+
+  validate-release:
+    name: Validate Release PR (main only)
+    if: github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch main branch
+        run: git fetch origin main:refs/remotes/origin/main
+
+      - name: Enforce source branch is develop
+        shell: bash
+        env:
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$HEAD_REF" != "develop" ]]; then
+            echo "ERROR: PRs into main must come from develop."
+            echo "This PR's source branch is: $HEAD_REF"
+            exit 1
+          fi
+
+          echo "Source branch validated: develop"
+
+      - name: Validate release PR title
+        id: pr
+        shell: bash
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$PR_TITLE" =~ ^Release\ ([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "ERROR: This PR into main is not a valid release PR."
+            echo "Expected title: Release X.Y.Z"
+            echo "Actual title: $PR_TITLE"
+            exit 1
+          fi
+
+          VERSION_NAME="${BASH_REMATCH[1]}"
+
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+
+          echo "PR title: $PR_TITLE"
+          echo "Release version: $VERSION_NAME"
+
+      - name: Read version.properties (PR head)
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION_FILE="version.properties"
+
+          if [[ ! -f "$VERSION_FILE" ]]; then
+            echo "ERROR: $VERSION_FILE not found."
+            exit 1
+          fi
+
+          VERSION_CODE="$(grep '^versionCode=' "$VERSION_FILE" | cut -d'=' -f2)"
+          VERSION_NAME="$(grep '^versionName=' "$VERSION_FILE" | cut -d'=' -f2)"
+
+          if [[ -z "$VERSION_CODE" || -z "$VERSION_NAME" ]]; then
+            echo "ERROR: version.properties must contain versionCode and versionName."
+            exit 1
+          fi
+
+          if ! [[ "$VERSION_CODE" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: versionCode must be a positive integer."
+            exit 1
+          fi
+
+          if ! [[ "$VERSION_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: versionName must follow X.Y.Z format."
+            exit 1
+          fi
+
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+
+          echo "version.properties (PR head):"
+          echo "  versionCode=$VERSION_CODE"
+          echo "  versionName=$VERSION_NAME"
+
+      - name: Validate PR title matches version.properties
+        shell: bash
+        env:
+          PR_VERSION: ${{ steps.pr.outputs.version_name }}
+          FILE_VERSION: ${{ steps.version.outputs.version_name }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$PR_VERSION" != "$FILE_VERSION" ]]; then
+            echo "ERROR: Release version mismatch."
+            echo "PR title version:   $PR_VERSION"
+            echo "version.properties: $FILE_VERSION"
+            exit 1
+          fi
+
+          echo "Release version validated: $FILE_VERSION"
+
+      - name: Validate versionCode increment
+        shell: bash
+        env:
+          CURRENT_VERSION_CODE: ${{ steps.version.outputs.version_code }}
+        run: |
+          set -euo pipefail
+
+          if ! git cat-file -e "origin/main:version.properties" 2>/dev/null; then
+            echo "ERROR: version.properties does not exist on main."
+            exit 1
+          fi
+
+          PREVIOUS_VERSION_CODE="$(
+            git show "origin/main:version.properties" \
+              | grep '^versionCode=' \
+              | cut -d'=' -f2
+          )"
+
+          if [[ -z "$PREVIOUS_VERSION_CODE" ]]; then
+            echo "ERROR: Could not read previous versionCode from main."
+            exit 1
+          fi
+
+          if ! [[ "$PREVIOUS_VERSION_CODE" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: Previous versionCode on main is invalid."
+            exit 1
+          fi
+
+          EXPECTED_VERSION_CODE=$((PREVIOUS_VERSION_CODE + 1))
+
+          echo "Previous versionCode (main): $PREVIOUS_VERSION_CODE"
+          echo "Current versionCode (PR):    $CURRENT_VERSION_CODE"
+          echo "Expected versionCode:        $EXPECTED_VERSION_CODE"
+
+          if [[ "$CURRENT_VERSION_CODE" -ne "$EXPECTED_VERSION_CODE" ]]; then
+            echo "ERROR: versionCode must be exactly previous versionCode + 1."
+            exit 1
+          fi
+
+          echo "versionCode increment validated."
+
+      - name: Check release does not already exist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION_NAME: ${{ steps.version.outputs.version_name }}
+        run: |
+          set -euo pipefail
+
+          TAG="v${VERSION_NAME}"
+
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "ERROR: GitHub Release $TAG already exists."
+            exit 1
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "ERROR: Git tag $TAG already exists."
+            exit 1
+          fi
