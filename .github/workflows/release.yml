@@ -14,6 +14,9 @@ concurrency:
 permissions:
   contents: write
 
+env:
+  APP_NAME: OhMyGOAD
+
 jobs:
   release:
     name: Build, Sign & Publish Release
@@ -337,7 +340,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          ALIGNED_APK="$RUNNER_TEMP/OhMyGOAD-aligned.apk"
+          ALIGNED_APK="$RUNNER_TEMP/${APP_NAME}-aligned.apk"
 
           "$BUILD_TOOLS/zipalign" \
             -P 16 \
@@ -385,7 +388,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          SIGNED_APK="$RUNNER_TEMP/OhMyGOAD-signed.apk"
+          SIGNED_APK="$RUNNER_TEMP/${APP_NAME}-signed.apk"
 
           cp "$ALIGNED_APK" "$SIGNED_APK"
 
@@ -429,12 +432,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          FINAL_APK="$RUNNER_TEMP/OhMyGOAD-v${VERSION_NAME}.apk"
+          FINAL_APK="$RUNNER_TEMP/${APP_NAME}-v${VERSION_NAME}.apk"
+          FINAL_FILENAME="${APP_NAME}-v${VERSION_NAME}.apk"
 
           cp "$SIGNED_APK" "$FINAL_APK"
 
           echo "path=$FINAL_APK" >> "$GITHUB_OUTPUT"
-          echo "filename=OhMyGOAD-v${VERSION_NAME}.apk" >> "$GITHUB_OUTPUT"
+          echo "filename=$FINAL_FILENAME" >> "$GITHUB_OUTPUT"
 
           echo "Final APK:"
           echo "$FINAL_APK"
@@ -469,10 +473,11 @@ jobs:
           VERSION_NAME: ${{ steps.version.outputs.version_name }}
           SHA256: ${{ steps.checksum.outputs.sha256 }}
           REPOSITORY: ${{ github.repository }}
+          FINAL_FILENAME: ${{ steps.final_apk.outputs.filename }}
         run: |
           set -euo pipefail
 
-          DOWNLOAD_URL="https://github.com/${REPOSITORY}/releases/download/v${VERSION_NAME}/OhMyGOAD-v${VERSION_NAME}.apk"
+          DOWNLOAD_URL="https://github.com/${REPOSITORY}/releases/download/v${VERSION_NAME}/${FINAL_FILENAME}"
 
           cat > latest.json <<EOF
           {
@@ -508,7 +513,7 @@ jobs:
             "$FINAL_APK" \
             latest.json \
             --target "$MERGE_COMMIT_SHA" \
-            --title "OhMyGOAD ${VERSION_NAME}" \
+            --title "${APP_NAME} ${VERSION_NAME}" \
             --generate-notes \
             --latest \
             --fail-on-no-commits
