@@ -47,6 +47,12 @@ jobs:
         run: |
           echo "short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
+      - name: Compute safe branch name for artifact names
+        id: branch
+        run: |
+          SAFE_BRANCH="$(echo "${{ github.ref_name }}" | tr '/' '-')"
+          echo "safe_name=$SAFE_BRANCH" >> "$GITHUB_OUTPUT"
+
       - name: Upload Debug APK - long retention
         if: success() && github.ref_name == 'develop'
         uses: actions/upload-artifact@v4
@@ -60,7 +66,7 @@ jobs:
         if: success() && github.ref_name != 'develop'
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.ref_name }}-debug-${{ steps.sha.outputs.short_sha }}
+          name: ${{ steps.branch.outputs.safe_name }}-debug-${{ steps.sha.outputs.short_sha }}
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 1
@@ -81,7 +87,7 @@ jobs:
         if: always() && github.ref_name != 'develop'
         uses: actions/upload-artifact@v4
         with:
-          name: reports-${{ github.ref_name }}-${{ steps.sha.outputs.short_sha }}
+          name: reports-${{ steps.branch.outputs.safe_name }}-${{ steps.sha.outputs.short_sha }}
           path: |
             **/build/reports/tests/**
             **/build/test-results/**
