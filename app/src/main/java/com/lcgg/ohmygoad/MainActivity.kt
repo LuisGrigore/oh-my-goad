@@ -1,5 +1,6 @@
 package com.lcgg.ohmygoad
 
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -9,22 +10,21 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import com.lcgg.ohmygoad.ui.theme.OhMyGOADTheme
-//WAAA
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
+            UpdateCheckHandler()
             OhMyGOADTheme {
-                UpdateCheckHandler()
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    Greeting(
-                        name = "Android",
-                        modifier = Modifier.padding(innerPadding)
-                    )
+                    AppVersion(modifier = Modifier.padding(innerPadding))
                 }
             }
         }
@@ -32,17 +32,25 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
+fun AppVersion(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val versionName = remember {
+        context.packageManager.getPackageInfo(
+            context.packageName,
+            PackageManager.PackageInfoFlags.of(0),
+        ).versionName
+    }
+
     Text(
-        text = "Hello $name!",
-        modifier = modifier
+        text = "Version $versionName",
+        modifier = modifier,
     )
 }
 
 @Preview(showBackground = true)
 @Composable
-fun GreetingPreview() {
+fun AppVersionPreview() {
     OhMyGOADTheme {
-        Greeting("Android")
+        Text(text = "Version 1.0.0")
     }
 }

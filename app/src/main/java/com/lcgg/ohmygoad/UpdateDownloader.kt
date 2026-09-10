@@ -1,13 +1,11 @@
 package com.lcgg.ohmygoad
-
 import android.app.DownloadManager
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.net.Uri
 import android.os.Environment
 import androidx.core.content.FileProvider
+import kotlinx.coroutines.delay
 import java.io.File
 import java.security.MessageDigest
 
@@ -31,6 +29,32 @@ object UpdateDownloader {
             .setAllowedOverRoaming(true)
 
         return downloadManager.enqueue(request)
+    }
+
+    /**
+     * Polls DownloadManager until the given download finishes (successfully or not).
+     * Avoids relying on ACTION_DOWNLOAD_COMPLETE, which can be missed if the download
+     * finishes before a BroadcastReceiver has had a chance to register.
+     */
+    suspend fun awaitDownload(context: Context, downloadId: Long): Boolean {
+        val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+
+        while (true) {
+            val query = DownloadManager.Query().setFilterById(downloadId)
+            downloadManager.query(query).use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val statusIndex = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
+                    when (cursor.getInt(statusIndex)) {
+                        DownloadManager.STATUS_SUCCESSFUL -> return true
+                        DownloadManager.STATUS_FAILED -> return false
+                    }
+                } else {
+                    // Entry gone (e.g. user cancelled it from the system download UI)
+                    return false
+                }
+            }
+            delay(500)
+        }
     }
 
     fun downloadedFile(context: Context, update: UpdateInfo): File =
@@ -62,27 +86,5 @@ object UpdateDownloader {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(intent)
-    }
-
-    fun registerDownloadCompleteReceiver(
-        context: Context,
-        downloadId: Long,
-        onComplete: () -> Unit,
-    ): BroadcastReceiver {
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(ctx: Context, intent: Intent) {
-                val completedId = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
-                if (completedId == downloadId) {
-                    onComplete()
-                }
-            }
-        }
-        // minSdk is 33 (Tiramisu), so RECEIVER_NOT_EXPORTED is always available.
-        context.registerReceiver(
-            receiver,
-            IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
-            Context.RECEIVER_NOT_EXPORTED,
-        )
-        return receiver
     }
 }
